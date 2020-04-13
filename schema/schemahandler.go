@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/xitongsys/parquet-go/common"
 	"github.com/xitongsys/parquet-go/parquet"
@@ -252,7 +251,7 @@ func NewSchemaHandlerFromStruct(obj interface{}, rootName string) (sh *SchemaHan
 	ot := reflect.TypeOf(obj).Elem()
 	item := NewItem()
 	item.GoType = ot
-	item.Info.InName = strings.Title(rootName)
+	item.Info.InName = common.HeadToUpper(rootName)
 	item.Info.ExName = rootName
 	item.Info.RepetitionType = parquet.FieldRepetitionType_REQUIRED
 
