@@ -42,6 +42,14 @@ type ParquetWriter struct {
 	MarshalFunc func(src []interface{}, bgn int, end int, sh *schema.SchemaHandler) (*map[string]*layout.Table, error)
 }
 
+// Options for ParquetWriter.
+type Options struct {
+	// Name for the root type when using schema from structure.
+	RootName string
+	// Number of parallel processors.
+	NumProcessors int64
+}
+
 //Create a parquet handler. Obj is a object with tags or JSON schema string.
 func NewParquetWriter(pFile source.ParquetFile, obj interface{}, np int64) (*ParquetWriter, error) {
 	var err error
@@ -61,7 +69,7 @@ func NewParquetWriter(pFile source.ParquetFile, obj interface{}, np int64) (*Par
 	res.DictRecs = make(map[string]*layout.DictRecType)
 	res.Footer = parquet.NewFileMetaData()
 	res.Footer.Version = 1
-	//include the createdBy to avoid 
+	//include the createdBy to avoid
 	//WARN  CorruptStatistics:118 - Ignoring statistics because created_by is null or empty! See PARQUET-251 and PARQUET-297
 	createdBy := "parquet-go version latest"
 	res.Footer.CreatedBy = &createdBy
@@ -77,7 +85,54 @@ func NewParquetWriter(pFile source.ParquetFile, obj interface{}, np int64) (*Par
 			res.SchemaHandler = schema.NewSchemaHandlerFromSchemaList(sa)
 
 		} else {
-			if res.SchemaHandler, err = schema.NewSchemaHandlerFromStruct(obj); err != nil {
+			if res.SchemaHandler, err = schema.NewSchemaHandlerFromStruct(obj, ""); err != nil {
+				return res, err
+			}
+		}
+
+		res.Footer.Schema = append(res.Footer.Schema, res.SchemaHandler.SchemaElements...)
+	}
+
+	return res, err
+}
+
+// NewParquetWriterWithOptions creates a parquet handler. Obj is a object with tags or JSON schema string.
+// Alternative to NewParquetWriter with options in structure.
+func NewParquetWriterWithOptions(pFile source.ParquetFile, obj interface{}, o Options) (*ParquetWriter, error) {
+	var err error
+
+	res := new(ParquetWriter)
+	res.NP = o.NumProcessors
+	res.PageSize = 8 * 1024              //8K
+	res.RowGroupSize = 128 * 1024 * 1024 //128M
+	res.CompressionType = parquet.CompressionCodec_SNAPPY
+	res.ObjsSize = 0
+	res.CheckSizeCritical = 0
+	res.Size = 0
+	res.NumRows = 0
+	res.Offset = 4
+	res.PFile = pFile
+	res.PagesMapBuf = make(map[string][]*layout.Page)
+	res.DictRecs = make(map[string]*layout.DictRecType)
+	res.Footer = parquet.NewFileMetaData()
+	res.Footer.Version = 1
+	//include the createdBy to avoid
+	//WARN  CorruptStatistics:118 - Ignoring statistics because created_by is null or empty! See PARQUET-251 and PARQUET-297
+	createdBy := "parquet-go version latest"
+	res.Footer.CreatedBy = &createdBy
+	_, err = res.PFile.Write([]byte("PAR1"))
+	res.MarshalFunc = marshal.Marshal
+
+	if obj != nil {
+		if sa, ok := obj.(string); ok {
+			err = res.SetSchemaHandlerFromJSON(sa)
+			return res, err
+
+		} else if sa, ok := obj.([]*parquet.SchemaElement); ok {
+			res.SchemaHandler = schema.NewSchemaHandlerFromSchemaList(sa)
+
+		} else {
+			if res.SchemaHandler, err = schema.NewSchemaHandlerFromStruct(obj, o.RootName); err != nil {
 				return res, err
 			}
 		}

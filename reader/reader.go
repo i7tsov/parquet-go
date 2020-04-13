@@ -4,16 +4,16 @@ import (
 	"encoding/binary"
 	"io"
 	"reflect"
-	"sync"
 	"strings"
+	"sync"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/xitongsys/parquet-go/common"
 	"github.com/xitongsys/parquet-go/layout"
 	"github.com/xitongsys/parquet-go/marshal"
-	"github.com/xitongsys/parquet-go/source"
-	"github.com/xitongsys/parquet-go/schema"
 	"github.com/xitongsys/parquet-go/parquet"
+	"github.com/xitongsys/parquet-go/schema"
+	"github.com/xitongsys/parquet-go/source"
 )
 
 type ParquetReader struct {
@@ -25,8 +25,16 @@ type ParquetReader struct {
 	ColumnBuffers map[string]*ColumnBufferType
 
 	//One reader can only read one type objects
-	ObjType			reflect.Type
-	ObjPartialType	reflect.Type
+	ObjType        reflect.Type
+	ObjPartialType reflect.Type
+}
+
+// Options for ParquetReader.
+type Options struct {
+	// Name for the root type when using schema from structure.
+	RootName string
+	// Number of parallel processors.
+	NumProcessors int64
 }
 
 //Create a parquet reader: obj is a object with schema tags or a JSON schema string
@@ -49,12 +57,56 @@ func NewParquetReader(pFile source.ParquetFile, obj interface{}, np int64) (*Par
 			res.SchemaHandler = schema.NewSchemaHandlerFromSchemaList(sa)
 
 		} else {
-			if res.SchemaHandler, err = schema.NewSchemaHandlerFromStruct(obj); err != nil {
+			if res.SchemaHandler, err = schema.NewSchemaHandlerFromStruct(obj, ""); err != nil {
 				return res, err
 			}
 		}
 
-	}else{
+	} else {
+		res.SchemaHandler = schema.NewSchemaHandlerFromSchemaList(res.Footer.Schema)
+	}
+
+	res.RenameSchema()
+	for i := 0; i < len(res.SchemaHandler.SchemaElements); i++ {
+		schema := res.SchemaHandler.SchemaElements[i]
+		if schema.GetNumChildren() == 0 {
+			pathStr := res.SchemaHandler.IndexMap[int32(i)]
+			if res.ColumnBuffers[pathStr], err = NewColumnBuffer(pFile, res.Footer, res.SchemaHandler, pathStr); err != nil {
+				return res, err
+			}
+		}
+	}
+
+	return res, nil
+}
+
+// NewParquetReaderWithOptions creates a parquet reader: obj is a object with schema tags or a JSON schema string.
+// Alternative to NewParquetReaderWithOptions with options in structure.
+func NewParquetReaderWithOptions(pFile source.ParquetFile, obj interface{}, o Options) (*ParquetReader, error) {
+	var err error
+	res := new(ParquetReader)
+	res.NP = o.NumProcessors
+	res.PFile = pFile
+	if err = res.ReadFooter(); err != nil {
+		return nil, err
+	}
+	res.ColumnBuffers = make(map[string]*ColumnBufferType)
+
+	if obj != nil {
+		if sa, ok := obj.(string); ok {
+			err = res.SetSchemaHandlerFromJSON(sa)
+			return res, err
+
+		} else if sa, ok := obj.([]*parquet.SchemaElement); ok {
+			res.SchemaHandler = schema.NewSchemaHandlerFromSchemaList(sa)
+
+		} else {
+			if res.SchemaHandler, err = schema.NewSchemaHandlerFromStruct(obj, ""); err != nil {
+				return res, err
+			}
+		}
+
+	} else {
 		res.SchemaHandler = schema.NewSchemaHandlerFromSchemaList(res.Footer.Schema)
 	}
 
@@ -79,7 +131,6 @@ func (self *ParquetReader) SetSchemaHandlerFromJSON(jsonSchema string) error {
 		return err
 	}
 
-	
 	self.RenameSchema()
 	for i := 0; i < len(self.SchemaHandler.SchemaElements); i++ {
 		schemaElement := self.SchemaHandler.SchemaElements[i]
@@ -198,7 +249,7 @@ func (self *ParquetReader) Read(dstInterface interface{}) error {
 
 // Read maxReadNumber objects
 func (self *ParquetReader) ReadByNumber(maxReadNumber int) ([]interface{}, error) {
-	var err error 
+	var err error
 	if self.ObjType == nil {
 		if self.ObjType, err = self.SchemaHandler.GetType(self.SchemaHandler.GetRootInName()); err != nil {
 			return nil, err
@@ -228,13 +279,13 @@ func (self *ParquetReader) ReadPartial(dstInterface interface{}, prefixPath stri
 	if err != nil {
 		return err
 	}
-	
+
 	return self.read(dstInterface, prefixPath)
 }
 
-// Read maxReadNumber partial objects 
+// Read maxReadNumber partial objects
 func (self *ParquetReader) ReadPartialByNumber(maxReadNumber int, prefixPath string) ([]interface{}, error) {
-	var err error 
+	var err error
 	if self.ObjPartialType == nil {
 		if self.ObjPartialType, err = self.SchemaHandler.GetType(prefixPath); err != nil {
 			return nil, err
@@ -326,7 +377,7 @@ func (self *ParquetReader) read(dstInterface interface{}, prefixPath string) err
 		}
 		wg.Add(1)
 		go func(b, e, index int) {
-			defer func(){
+			defer func() {
 				wg.Done()
 			}()
 

@@ -2,12 +2,16 @@ package schema
 
 import (
 	"errors"
-	"reflect"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/xitongsys/parquet-go/common"
 	"github.com/xitongsys/parquet-go/parquet"
 )
+
+// DefaultRootName is default root name when using schema from structure.
+const DefaultRootName = "parquet_go_root"
 
 /*
 PathMap Example
@@ -133,7 +137,6 @@ func (self *SchemaHandler) GetRepetitionLevelIndex(path []string, rl int32) (int
 	return res, fmt.Errorf("rl = %d not found in path = %v", rl, path)
 }
 
-
 // MaxRepetitionLevel returns the max repetition level type of a column by it's schema path
 func (self *SchemaHandler) MaxRepetitionLevel(path []string) (int32, error) {
 	var res int32 = 0
@@ -228,7 +231,7 @@ func NewItem() *Item {
 }
 
 //Create schema handler from a object
-func NewSchemaHandlerFromStruct(obj interface{}) (sh *SchemaHandler, err error) {
+func NewSchemaHandlerFromStruct(obj interface{}, rootName string) (sh *SchemaHandler, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			switch x := r.(type) {
@@ -242,11 +245,15 @@ func NewSchemaHandlerFromStruct(obj interface{}) (sh *SchemaHandler, err error) 
 		}
 	}()
 
+	if rootName == "" {
+		rootName = DefaultRootName
+	}
+
 	ot := reflect.TypeOf(obj).Elem()
 	item := NewItem()
 	item.GoType = ot
-	item.Info.InName = "Parquet_go_root"
-	item.Info.ExName = "parquet_go_root"
+	item.Info.InName = strings.Title(rootName)
+	item.Info.ExName = rootName
 	item.Info.RepetitionType = parquet.FieldRepetitionType_REQUIRED
 
 	stack := make([]*Item, 1)
@@ -410,7 +417,7 @@ func NewSchemaHandlerFromSchemaList(schemas []*parquet.SchemaElement) *SchemaHan
 	schemaHandler.Infos = make([]*common.Tag, len(schemas))
 	for i := 0; i < len(schemas); i++ {
 		name := schemas[i].GetName()
-		InName, ExName := common.HeadToUpper(name),  name
+		InName, ExName := common.HeadToUpper(name), name
 		schemaHandler.Infos[i] = &common.Tag{
 			InName: InName,
 			ExName: ExName,
