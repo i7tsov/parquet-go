@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/apache/thrift/lib/go/thrift"
@@ -40,6 +41,8 @@ type ParquetWriter struct {
 	DictRecs map[string]*layout.DictRecType
 
 	MarshalFunc func(src []interface{}, bgn int, end int, sh *schema.SchemaHandler) (*map[string]*layout.Table, error)
+
+	RootPathDelimiter string
 }
 
 // Options for ParquetWriter.
@@ -48,6 +51,8 @@ type Options struct {
 	RootName string
 	// Number of parallel processors.
 	NumProcessors int64
+	// Replace this symbol in root name to dot ".". Leave empty for no replacement.
+	RootPathDelimiter string
 }
 
 //Create a parquet handler. Obj is a object with tags or JSON schema string.
@@ -122,6 +127,7 @@ func NewParquetWriterWithOptions(pFile source.ParquetFile, obj interface{}, o Op
 	res.Footer.CreatedBy = &createdBy
 	_, err = res.PFile.Write([]byte("PAR1"))
 	res.MarshalFunc = marshal.Marshal
+	res.RootPathDelimiter = o.RootPathDelimiter
 
 	if obj != nil {
 		if sa, ok := obj.(string); ok {
@@ -156,7 +162,11 @@ func (self *ParquetWriter) SetSchemaHandlerFromJSON(jsonSchema string) error {
 //Rename schema name to exname in tags
 func (self *ParquetWriter) RenameSchema() {
 	for i := 0; i < len(self.Footer.Schema); i++ {
-		self.Footer.Schema[i].Name = self.SchemaHandler.Infos[i].ExName
+		exName := self.SchemaHandler.Infos[i].ExName
+		if self.RootPathDelimiter != "" {
+			exName = strings.Replace(exName, self.RootPathDelimiter, ".", -1)
+		}
+		self.Footer.Schema[i].Name = exName
 	}
 	for _, rowGroup := range self.Footer.RowGroups {
 		for _, chunk := range rowGroup.Columns {
