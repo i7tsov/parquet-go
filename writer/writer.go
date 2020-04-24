@@ -53,6 +53,8 @@ type Options struct {
 	NumProcessors int64
 	// Replace this symbol in root name to dot ".". Leave empty for no replacement.
 	RootPathDelimiter string
+	// Metadata key/values for file footer.
+	FooterKeyValue map[string]string
 }
 
 //Create a parquet handler. Obj is a object with tags or JSON schema string.
@@ -128,6 +130,16 @@ func NewParquetWriterWithOptions(pFile source.ParquetFile, obj interface{}, o Op
 	_, err = res.PFile.Write([]byte("PAR1"))
 	res.MarshalFunc = marshal.Marshal
 	res.RootPathDelimiter = o.RootPathDelimiter
+	if o.FooterKeyValue != nil {
+		res.Footer.KeyValueMetadata = make([]*parquet.KeyValue, 0, len(o.FooterKeyValue))
+		for k, v := range o.FooterKeyValue {
+			val := v
+			res.Footer.KeyValueMetadata = append(res.Footer.KeyValueMetadata, &parquet.KeyValue{
+				Key:   k,
+				Value: &val,
+			})
+		}
+	}
 
 	if obj != nil {
 		if sa, ok := obj.(string); ok {
